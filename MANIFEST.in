@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include globalfm *.css
+recursive-include globalfm *.csv
+recursive-include globalfm *.html
+recursive-include globalfm *.ico
+recursive-include globalfm *.js
+recursive-include globalfm *.json
+recursive-include globalfm *.md
+recursive-include globalfm *.png
+recursive-include globalfm *.py
+recursive-include globalfm *.svg
+recursive-include globalfm *.txt
+recursive-exclude globalfm *.pyc
