@@ -415,6 +415,170 @@ def add_attendance(self,method):
 			attendance_hour=att_hour
 		)).insert(ignore_permissions=True)
 
-			
+		timesheet_to_attendance_submit=frappe.db.get_value("Global FM Setting","Global FM Setting","timesheet_to_attendance_submit")
+		if int(timesheet_to_attendance_submit)==1:
+			attendance_doc.submit()
+
+
+@frappe.whitelist()
+def copy_timesheet_for_rest_day(name):
+	time_sheet_doc=frappe.get_doc("Timesheet",name)
+	last_day=get_last_day(time_sheet_doc.start_date)
+	cur_date=add_days(time_sheet_doc.start_date,1)
+	count=1
+	while getdate(last_day)>=getdate(cur_date):
+		time_dict=[]
+		for row in time_sheet_doc.time_logs:
+			time_json={}
+			time_json["activity_type"]=row.activity_type
+			time_json["from_time"]=add_days(row.from_time,count)
+			time_json["to_time"]=add_days(row.to_time,count)
+			time_dict.append(time_json)
+
+		doc=frappe.get_doc(dict(
+			doctype="Timesheet",
+			employee=time_sheet_doc.employee,
+			company=time_sheet_doc.company,
+			time_logs=time_dict
+		
+		)).insert()
+		timesheet_submit_on_duplicate=frappe.db.get_value("Global FM Setting","Global FM Setting","timesheet_submit_on_duplicate")
+		if int(timesheet_submit_on_duplicate)==1:
+			doc.submit()
+		cur_date = add_days(cur_date,1)
+		count += 1
+	frappe.msgprint(str(count)+" Timesheet Added")
+
+@frappe.whitelist()
+def cost_count_for_based_on_timesheet(self,method):
+	total = 0
+	for row in self.time_logs:
+		actual_rate = get_salary_structure_rate(self.employee,getdate(row.from_time),row.hours)
+		other_rate = get_salary_structure_rate_designation(row.designation,'8')
+		if self.designation == row.designation:
+			row.actual_cost = flt(actual_rate) * flt(row.hours)
+		else:
+			row.actual_cost = flt(other_rate) * flt(row.hours)
+		total += flt(row.actual_cost) or 0
+	self.total_cost = total
+
+		
+@frappe.whitelist()
+def project_wise_cost_assign(self,method):
+	if len(self.time_logs) > 2:
+		frappe.throw(_("More Than 2 Row Not Allow In Timesheet Log"))
+
+	if len(self.time_logs) == 1:
+		for row in self.time_logs:
+			row.cost = row.actual_cost
+		
+	if len(self.time_logs) == 2:
+		p_type1 = ''
+		p_type2 = ''
+		for row in self.time_logs:
+			if int(row.idx) == 1:
+				p_type1 = frappe.db.get_value("Project",row.project,"project_type")
+			if int(row.idx) == 2:
+				p_type2 = frappe.db.get_value("Project",row.project,"project_type")
+		if p_type1 == p_type2:
+			hour1 = ''
+			hour2 = ''
+			cost = self.total_cost
+			p1_cost = 0
+			p2_cost = 0
+			for row in self.time_logs:
+				if int(row.idx) == 1:
+					hour1 = row.hours
+				if int(row.idx) == 2:
+					hour2 = row.hours
+			if flt(hour1) == flt(hour2):
+				for row in self.time_logs:
+					row.cost = flt(self.total_cost)/2
+			else:
+				eight_hour_rate = flt(self.total_cost)/2
+				four_hour_rate = flt(eight_hour_rate)/2
+				if flt(self.total_hours) == 16:
+					if flt(hour1) == 12 and flt(hour2) == 4:
+						p1_cost = eight_hour_rate + four_hour_rate
+						p2_cost = four_hour_rate
+					if flt(hour1) == 4 and flt(hour2) == 12:
+						p2_cost = eight_hour_rate + four_hour_rate
+						p1_cost = four_hour_rate
+				else:
+					if flt(hour1) == 8 and flt(hour2) == 4:
+						p2_cost = four_hour_rate
+						p1_cost = flt(self.total_cost) - flt(p2_cost)
+					if flt(hour1) == 4 and flt(hour2) == 8:
+						p1_cost = four_hour_rate
+						p2_cost = flt(self.total_cost) - flt(p2_cost)
+				
+				for row in self.time_logs:
+					if int(row.idx) == 1:
+						row.cost = p1_cost
+					if int(row.idx) == 2:
+						row.cost = p2_cost
+					
+		else:
+			p_hour = ''
+			g_hour = ''
+			cost = self.total_cost
+			p_cost = 0
+			g_cost = 0
+			for row in self.time_logs:
+				if frappe.db.get_value("Project",row.project,"project_type") == "Goverment":
+					g_hour = row.hours
+				if frappe.db.get_value("Project",row.project,"project_type") == "Private":
+					p_hour = row.hours
+			if flt(g_hour) == flt(p_hour):
+				cost_gov = flt(self.total_cost)*0.4
+				cost_pri = flt(self.total_cost)*0.6
+				for row in self.time_logs:
+					if frappe.db.get_value("Project",row.project,"project_type") == "Goverment":
+						row.cost = cost_gov
+					if frappe.db.get_value("Project",row.project,"project_type") == "Private":
+						row.cost = cost_pri
+			else:
+				eight_hour_rate_gov = flt(self.total_cost)*0.4
+				eight_hour_rate_pri = flt(self.total_cost)*0.6
+				four_hour_rate_gov = flt(eight_hour_rate_gov)/2
+				four_hour_rate_pri = flt(eight_hour_rate_pri)/2
+				if flt(self.total_hours) == 16:
+					if flt(p_hour) == 12 and flt(g_hour) == 4:
+						g_cost = four_hour_rate_gov
+						p_cost = self.total_cost - g_cost
+					if flt(p_hour) == 4 and flt(g_hour) == 12:
+						p_cost = four_hour_rate_pri
+						g_cost = self.total_cost - p_cost
+				else:
+					if flt(p_hour) == 8 and flt(g_hour) == 4:
+						g_cost = four_hour_rate_gov
+						p_cost = flt(self.total_cost) - flt(g_cost)
+					if flt(p_hour) == 4 and flt(g_hour) == 8:
+						p_cost = four_hour_rate_pri
+						g_cost = flt(self.total_cost) - flt(p_cost)
+				
+				for row in self.time_logs:
+					if frappe.db.get_value("Project",row.project,"project_type") == "Goverment":
+						row.cost = g_cost
+					if frappe.db.get_value("Project",row.project,"project_type") == "Private":
+						row.cost = p_cost
+
+
+
+def get_salary_structure_rate(employee,date,hour):
+	ss_rate=frappe.db.sql("""select sshw.hourly as rate from `tabSalary Structure Hour Wise` as sshw inner join `tabSalary Structure Assignment` as ssa on sshw.parent=ssa.name where ssa.from_date<=%s and ssa.employee=%s and sshw.work_hour=%s""",(str(date),employee,hour),as_dict=1)
+	#frappe.errprint("ss_rate"+str(ss_rate))
+	if ss_rate:
+		return ss_rate[0].rate
+	else:
+		return 0
+
+def get_salary_structure_rate_designation(designation,hour):
+	ss_rate=frappe.db.sql("""select sshw.hourly as rate from `tabSalary Structure Hour Wise` as sshw inner join `tabDesignation` as d on sshw.parent=d.name where d.name=%s and sshw.work_hour=%s""",(designation,hour),as_dict=1)
+	#frappe.errprint("ss_rate"+str(ss_rate))
+	if ss_rate:
+		return ss_rate[0].rate
+	else:
+		return 0
 	
 

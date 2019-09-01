@@ -81,7 +81,9 @@ app_license = "MIT"
 
 doc_events = {
 	"Timesheet": {
- 		"on_submit": "globalfm.api.add_attendance"
+ 		"on_submit": "globalfm.api.add_attendance",
+		"validate": "globalfm.api.cost_count_for_based_on_timesheet",
+		"before_submit": "globalfm.api.project_wise_cost_assign"
 	}
 }
 
